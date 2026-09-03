@@ -1,0 +1,59 @@
+{
+  "campaign": {
+    "slug": "les-cendres-de-neverwinter",
+    "name": "Les Cendres de Neverwinter"
+  },
+  "users": [
+    {
+      "email": "mj@exemple.fr",
+      "displayName": "Antoine",
+      "role": "DM"
+    },
+    {
+      "email": "lea@exemple.fr",
+      "displayName": "Léa",
+      "role": "PLAYER",
+      "character": {
+        "slug": "sylvaine",
+        "name": "Sylvaine",
+        "classIndex": "ranger",
+        "level": 3,
+        "raceIndex": "half-elf",
+        "raceLabel": "Demi-elfe",
+        "backgroundLabel": "Ermite",
+        "alignmentIndex": "chaotic-good",
+        "abilities": {
+          "strength": 12,
+          "dexterity": 17,
+          "constitution": 14,
+          "intelligence": 10,
+          "wisdom": 15,
+          "charisma": 8
+        }
+      }
+    },
+    {
+      "email": "tom@exemple.fr",
+      "displayName": "Tom",
+      "role": "PLAYER",
+      "character": {
+        "slug": "borgan",
+        "name": "Borgan Pierrepoing",
+        "classIndex": "fighter",
+        "level": 3,
+        "raceIndex": "dwarf",
+        "raceLabel": "Nain",
+        "backgroundLabel": "Soldat",
+        "alignmentIndex": "lawful-good",
+        "abilities": {
+          "strength": 17,
+          "dexterity": 12,
+          "constitution": 16,
+          "intelligence": 9,
+          "wisdom": 11,
+          "charisma": 10
+        }
+      }
+    }
+  ]
+}

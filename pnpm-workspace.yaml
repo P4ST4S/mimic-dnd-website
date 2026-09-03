@@ -1,3 +1,12 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# Prisma doit exécuter son script d'installation pour récupérer ses moteurs
+# natifs (query engine). esbuild est une dépendance de tsx (utilisé par le
+# seed). Sans cette liste, `prisma generate` et le seed échouent sous pnpm 10.
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - esbuild
+  - prisma

@@ -1,0 +1,401 @@
+// Schéma de données — voir docs/DATA_MODEL.md pour le détail champ par
+// champ, les unités et les invariants, et docs/adr/0005-tables-vs-json.md
+// pour la doctrine "table vs colonne vs Json" appliquée ici.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ═══════════════════════════ Identité & campagne ═══════════════════════════
+
+enum Role {
+  PLAYER
+  DM
+}
+
+/// Amorce générique de révélation progressive, réutilisée par la Chronique
+/// et le Codex (v2) sans migration : PUBLIC (hors-auth, inutilisé en v1),
+/// PARTY (tous les comptes connectés), PRIVATE (auteur seul), DM_ONLY.
+enum Visibility {
+  PUBLIC
+  PARTY
+  PRIVATE
+  DM_ONLY
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  displayName        String
+  role               Role      @default(PLAYER)
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  characters    Character[]     @relation("CharacterOwner")
+  campaignsAsDm Campaign[]      @relation("CampaignDm")
+  authoredNotes CharacterNote[]
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  dmId        String
+  dm          User     @relation("CampaignDm", fields: [dmId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  characters Character[]
+  // v2+ : journalEntries, npcs, monsters, mapLayers, partyStash, diceRolls,
+  // members — voir ROADMAP.md, aucune de ces tables n'existe encore.
+}
+
+// ═══════════════════════════════ Personnage ════════════════════════════════
+
+/// PC = personnage joueur. NPC amorce la future galerie de PNJ (v2.1),
+/// qui réutilisera cette même table plutôt que d'en créer une séparée.
+enum CharacterKind {
+  PC
+  NPC
+}
+
+model Character {
+  id       String        @id @default(cuid())
+  slug     String        @unique
+  kind     CharacterKind @default(PC)
+  name     String
+
+  ownerId    String
+  owner      User     @relation("CharacterOwner", fields: [ownerId], references: [id])
+  campaignId String? // nullable dès la v1 : multi-campagnes sans migration destructive
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+
+  // Identité 5e — on stocke le slug SRD anglais (clé stable, compatible
+  // D&D Beyond / Foundry) ET le libellé français affiché, dénormalisé.
+  raceIndex        String?
+  raceLabel        String?
+  subraceIndex     String?
+  subraceLabel     String?
+  backgroundIndex  String?
+  backgroundLabel  String?
+  alignmentIndex   String?
+  experiencePoints Int     @default(0)
+
+  // Caractéristiques : arité fixe et toujours présente → colonnes scalaires.
+  strength     Int @default(10)
+  dexterity    Int @default(10)
+  constitution Int @default(10)
+  intelligence Int @default(10)
+  wisdom       Int @default(10)
+  charisma     Int @default(10)
+
+  // Combat — les valeurs calculables (bonus de maîtrise, perception passive)
+  // ne sont PAS stockées ; seuls les overrides explicites le sont.
+  armorClass                Int  @default(10)
+  initiativeMisc            Int  @default(0)
+  speedFt                   Int  @default(30)
+  proficiencyBonusOverride  Int?
+  passivePerceptionOverride Int?
+
+  hpMax     Int @default(1)
+  hpCurrent Int @default(1)
+  hpTemp    Int @default(0)
+
+  /// Slugs anglais ("str","dex",…) : liste plate sans métadonnée par élément.
+  savingThrowProficiencies String[]
+
+  deathSaveSuccesses Int     @default(0)
+  deathSaveFailures  Int     @default(0)
+  inspiration        Boolean @default(false)
+  /// Slugs SRD ("poisoned","prone",…) — liste plate, jamais mutée ligne par ligne.
+  conditions         String[]
+  exhaustionLevel    Int     @default(0)
+
+  // Incantation — une seule source en v1 (multiclasses avec plusieurs
+  // classes de lanceur : voir lib/rules/spellcasting.ts, la formule gère
+  // déjà le cas général même si l'UI v1 n'expose qu'une caractéristique).
+  spellcastingAbility String?
+  spellSaveDcOverride Int?
+  spellAttackOverride Int?
+
+  // Bourse — 5 monnaies, arité fixe.
+  copper   Int @default(0)
+  silver   Int @default(0)
+  electrum Int @default(0)
+  gold     Int @default(0)
+  platinum Int @default(0)
+
+  // Portrait — chaîne libre : `public/portraits/<slug>.webp` en v1,
+  // migration vers Vercel Blob possible sans migration SQL (même colonne).
+  portraitUrl         String?
+  portraitAlt         String?
+  portraitWidth       Int?
+  portraitHeight      Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classes       CharacterClass[]
+  skills        CharacterSkill[]
+  proficiencies CharacterProficiency[]
+  features      CharacterFeature[]
+  spells        CharacterSpell[]
+  spellSlots    SpellSlot[]
+  items         InventoryItem[]
+  notes         CharacterNote[]
+  bio           CharacterBio?
+
+  @@index([campaignId])
+  @@index([ownerId])
+}
+
+/// Une ligne par classe : c'est ce qui rend le multiclassage gratuit dès la
+/// v1 (bonus de maîtrise, emplacements de sorts et dés de vie dépendent du
+/// niveau TOTAL / du niveau de lanceur composite — voir lib/rules).
+model CharacterClass {
+  id            String    @id @default(cuid())
+  characterId   String
+  character     Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  classIndex    String
+  classLabel    String
+  subclassIndex String?
+  subclassLabel String?
+  level         Int       @default(1)
+  hitDieSize    Int // 6 | 8 | 10 | 12
+  hitDiceUsed   Int       @default(0)
+  isPrimary     Boolean   @default(true) // classe de départ
+  order         Int       @default(0)
+
+  @@unique([characterId, classIndex])
+  @@index([characterId])
+}
+
+enum ProficiencyLevel {
+  NONE
+  HALF
+  PROFICIENT
+  EXPERTISE
+}
+
+/// Une ligne par compétence maîtrisée : `proficiency` se coche compétence
+/// par compétence, une colonne Json obligerait à réécrire tout le blob à
+/// chaque clic (risque d'écrasement concurrent joueur / MJ).
+model CharacterSkill {
+  id          String           @id @default(cuid())
+  characterId String
+  character   Character        @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  skillIndex  String // "stealth" — libellé FR résolu depuis src/srd/fr/skills.json
+  proficiency ProficiencyLevel @default(PROFICIENT)
+  miscBonus   Int              @default(0)
+
+  @@unique([characterId, skillIndex])
+}
+
+enum ProficiencyKind {
+  WEAPON
+  ARMOR
+  TOOL
+  LANGUAGE
+  OTHER
+}
+
+/// Une seule table pour armes, armures, outils et langues : ce sont des
+/// listes de tags avec au plus un libellé, pas un état muté individuellement.
+model CharacterProficiency {
+  id          String          @id @default(cuid())
+  characterId String
+  character   Character       @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  kind        ProficiencyKind
+  srdIndex    String?
+  label       String // texte libre FR autorisé (maîtrises "maison")
+  order       Int             @default(0)
+
+  @@index([characterId, kind])
+}
+
+enum FeatureSource {
+  CLASS
+  SUBCLASS
+  RACE
+  BACKGROUND
+  FEAT
+  ITEM
+  OTHER
+}
+
+enum RechargeOn {
+  NONE
+  SHORT_REST
+  LONG_REST
+  DAWN
+}
+
+model CharacterFeature {
+  id            String        @id @default(cuid())
+  characterId   String
+  character     Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?       @db.Text
+  source        FeatureSource @default(CLASS)
+  levelAcquired Int?
+  srdIndex      String?
+  /// Snapshot immuable du texte SRD FR au moment de l'ajout — Json car
+  /// jamais requêté champ par champ, jamais muté (c'est un cache, pas de l'état).
+  srdSnapshot   Json?
+  usesMax       Int?
+  usesUsed      Int           @default(0)
+  rechargeOn    RechargeOn    @default(NONE)
+  visibility    Visibility    @default(PARTY)
+  order         Int           @default(0)
+
+  @@index([characterId])
+}
+
+/// STANDARD = emplacements classiques (multiclasse, table composite).
+/// PACT = magie de pacte du Sorcier, calculée séparément (jamais additionnée
+/// aux emplacements standards) — voir lib/rules/spellcasting.ts.
+enum SlotKind {
+  STANDARD
+  PACT
+}
+
+model SpellSlot {
+  id          String    @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  kind        SlotKind  @default(STANDARD)
+  level       Int // 1..9
+  max         Int       @default(0)
+  used        Int       @default(0)
+
+  @@unique([characterId, kind, level])
+}
+
+enum SpellSource {
+  CLASS
+  RACE
+  ITEM
+  FEAT
+}
+
+model CharacterSpell {
+  id             String      @id @default(cuid())
+  characterId    String
+  character      Character   @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  srdIndex       String? // "fireball"
+  name           String // "Boule de feu" — copie dénormalisée affichée
+  level          Int // 0 = tour de magie
+  school         String?
+  isPrepared     Boolean     @default(false)
+  alwaysPrepared Boolean     @default(false) // rituels raciaux, domaines
+  source         SpellSource @default(CLASS)
+  classIndex     String? // utile en multiclasse
+  notes          String?
+  srdSnapshot    Json? // description FR complète figée
+  order          Int         @default(0)
+
+  @@unique([characterId, srdIndex, source])
+  @@index([characterId, level])
+}
+
+enum ItemCategory {
+  WEAPON
+  ARMOR
+  SHIELD
+  AMMUNITION
+  POTION
+  SCROLL
+  WAND
+  ROD
+  RING
+  WONDROUS
+  TOOL
+  GEAR
+  TREASURE
+  OTHER
+}
+
+enum ItemRarity {
+  NONE
+  COMMON
+  UNCOMMON
+  RARE
+  VERY_RARE
+  LEGENDARY
+  ARTIFACT
+  VARIES
+}
+
+/// Table normalisée (pas un Json d'inventaire) : `equipped`, `attuned` et
+/// `quantity` se mutent ligne par ligne, indépendamment les uns des autres.
+model InventoryItem {
+  id                 String       @id @default(cuid())
+  characterId        String
+  character          Character    @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  srdIndex           String?
+  name               String
+  category           ItemCategory @default(GEAR)
+  rarity             ItemRarity   @default(NONE)
+  quantity           Int          @default(1)
+  weightLb           Decimal?     @db.Decimal(8, 2) // livres, comme le Manuel des Joueurs FR
+  equipped           Boolean      @default(false)
+  requiresAttunement Boolean      @default(false)
+  attuned            Boolean      @default(false)
+  chargesMax         Int?
+  chargesUsed        Int?
+  description        String?      @db.Text
+  srdSnapshot        Json?
+  visibility         Visibility   @default(PARTY)
+  order              Int          @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([characterId])
+}
+
+/// 1:1 avec Character, dans sa propre table pour garder la ligne
+/// Character étroite : ces champs sont de longs blocs de texte, rarement
+/// lus ensemble avec les stats de combat.
+model CharacterBio {
+  characterId         String    @id
+  character           Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  backstory           String?   @db.Text
+  personalityTraits   String?   @db.Text
+  ideals              String?   @db.Text
+  bonds               String?   @db.Text
+  flaws               String?   @db.Text
+  appearance          String?   @db.Text
+  alliesOrganizations String?   @db.Text
+  age                 String?
+  height              String?
+  weight              String?
+  eyes                String?
+  skin                String?
+  hair                String?
+  updatedAt           DateTime  @updatedAt
+}
+
+model CharacterNote {
+  id          String     @id @default(cuid())
+  characterId String
+  character   Character  @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User       @relation(fields: [authorId], references: [id])
+  title       String?
+  body        String     @db.Text
+  visibility  Visibility @default(PRIVATE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([characterId, visibility])
+}
