@@ -100,7 +100,7 @@ export const CLASS_DEFAULTS: Record<string, ClassDefaults> = {
     spellcastingAbility: "cha",
   },
   warlock: {
-    label: "Sorcier",
+    label: "Occultiste",
     hitDie: 8,
     savingThrows: ["wis", "cha"],
     skills: ["arcana", "deception"],
