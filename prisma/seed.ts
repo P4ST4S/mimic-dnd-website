@@ -89,17 +89,38 @@ interface SeedCharacter {
   armorClass?: number;
   /** Override — sinon 30 (par défaut du schéma). */
   speedFt?: number;
+  /** Bonus fixe d'initiative hors DEX (dons type Alerte). Sinon 0. */
+  initiativeMisc?: number;
   /** Override — sinon calculée depuis SAG + maîtrise Perception. */
   passivePerception?: number;
-  /** Remplace les compétences génériques de CLASS_DEFAULTS si fourni. */
-  skills?: string[];
+  /**
+   * Remplace les compétences génériques de CLASS_DEFAULTS si fourni.
+   * Une simple chaîne = PROFICIENT ; objet pour EXPERTISE (Roublard...).
+   */
+  skills?: (string | { skillIndex: string; proficiency: "HALF" | "PROFICIENT" | "EXPERTISE" })[];
   toolProficiencies?: string[];
   languages?: string[];
   features?: SeedFeature[];
   spells?: SeedSpell[];
   /** Remplace le paquetage générique STARTER_GEAR si fourni. */
   items?: SeedItem[];
+  /** @deprecated utiliser `bio.personalityTraits` — conservé pour compat. */
   personalityTraits?: string;
+  bio?: Partial<{
+    backstory: string;
+    personalityTraits: string;
+    ideals: string;
+    bonds: string;
+    flaws: string;
+    appearance: string;
+    alliesOrganizations: string;
+    age: string;
+    height: string;
+    weight: string;
+    eyes: string;
+    skin: string;
+    hair: string;
+  }>;
   portrait?: SeedPortrait;
 }
 
@@ -279,6 +300,7 @@ async function seedCharacter(
       hpCurrent: hpMax,
       armorClass: input.armorClass ?? 10 + Math.floor((abilities.dexterity - 10) / 2),
       speedFt: input.speedFt ?? 30,
+      initiativeMisc: input.initiativeMisc ?? 0,
       passivePerceptionOverride: input.passivePerception,
       savingThrowProficiencies: classDef.savingThrows,
       spellcastingAbility: classDef.spellcastingAbility,
@@ -297,10 +319,11 @@ async function seedCharacter(
         },
       },
       skills: {
-        create: skillIndexes.map((skillIndex) => ({
-          skillIndex,
-          proficiency: "PROFICIENT" as const,
-        })),
+        create: skillIndexes.map((entry) =>
+          typeof entry === "string"
+            ? { skillIndex: entry, proficiency: "PROFICIENT" as const }
+            : { skillIndex: entry.skillIndex, proficiency: entry.proficiency },
+        ),
       },
       proficiencies: {
         create: [
@@ -344,7 +367,12 @@ async function seedCharacter(
           order: i,
         })),
       },
-      bio: { create: { personalityTraits: input.personalityTraits } },
+      bio: {
+        create: {
+          ...input.bio,
+          personalityTraits: input.bio?.personalityTraits ?? input.personalityTraits,
+        },
+      },
     },
     update: {
       name: input.name,
