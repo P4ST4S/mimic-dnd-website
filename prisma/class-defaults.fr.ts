@@ -13,6 +13,16 @@ export interface ClassDefaults {
 }
 
 export const CLASS_DEFAULTS: Record<string, ClassDefaults> = {
+  // Hors SRD 5.1 de base (Tasha's Cauldron of Everything / Eberron) — pas
+  // dans le PHB, mais nécessaire pour les personnages du groupe qui en jouent.
+  artificer: {
+    label: "Artificier",
+    hitDie: 8,
+    savingThrows: ["con", "int"],
+    skills: ["arcana", "investigation"],
+    casterType: "half",
+    spellcastingAbility: "int",
+  },
   barbarian: {
     label: "Barbare",
     hitDie: 12,

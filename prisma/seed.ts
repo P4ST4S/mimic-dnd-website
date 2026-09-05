@@ -21,13 +21,60 @@ import { FANTASY_WORDS_FR } from "./wordlist.fr";
 
 const RESET_PASSWORDS = process.argv.includes("--reset-passwords");
 
+interface SeedFeature {
+  name: string;
+  description?: string;
+  source?: "CLASS" | "SUBCLASS" | "RACE" | "BACKGROUND" | "FEAT" | "ITEM" | "OTHER";
+}
+
+interface SeedSpell {
+  name: string;
+  srdIndex?: string;
+  level: number;
+  isPrepared?: boolean;
+}
+
+interface SeedItem {
+  name: string;
+  category?:
+    | "WEAPON"
+    | "ARMOR"
+    | "SHIELD"
+    | "AMMUNITION"
+    | "POTION"
+    | "SCROLL"
+    | "WAND"
+    | "ROD"
+    | "RING"
+    | "WONDROUS"
+    | "TOOL"
+    | "GEAR"
+    | "TREASURE"
+    | "OTHER";
+  weightLb?: number;
+  quantity?: number;
+  equipped?: boolean;
+}
+
+interface SeedPortrait {
+  /** Nom de fichier dans public/portraits/ (déjà déposé là avant le seed). */
+  file: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+}
+
 interface SeedCharacter {
   slug: string;
   name: string;
   classIndex: string;
+  subclassLabel?: string;
   level: number;
   raceIndex?: string;
   raceLabel?: string;
+  subraceIndex?: string;
+  subraceLabel?: string;
+  backgroundIndex?: string;
   backgroundLabel?: string;
   alignmentIndex?: string;
   abilities?: Partial<{
@@ -38,6 +85,22 @@ interface SeedCharacter {
     wisdom: number;
     charisma: number;
   }>;
+  /** Override — sinon calculée depuis la DEX (formule d'armure de base). */
+  armorClass?: number;
+  /** Override — sinon 30 (par défaut du schéma). */
+  speedFt?: number;
+  /** Override — sinon calculée depuis SAG + maîtrise Perception. */
+  passivePerception?: number;
+  /** Remplace les compétences génériques de CLASS_DEFAULTS si fourni. */
+  skills?: string[];
+  toolProficiencies?: string[];
+  languages?: string[];
+  features?: SeedFeature[];
+  spells?: SeedSpell[];
+  /** Remplace le paquetage générique STARTER_GEAR si fourni. */
+  items?: SeedItem[];
+  personalityTraits?: string;
+  portrait?: SeedPortrait;
 }
 
 interface SeedUser {
@@ -192,6 +255,11 @@ async function seedCharacter(
     classDef.hitDie + conMod + Math.round((input.level - 1) * (avgRoll + conMod)),
   );
 
+  const skillIndexes = input.skills ?? classDef.skills;
+  const gear: SeedItem[] =
+    input.items ?? STARTER_GEAR.map((g) => ({ name: g.name, weightLb: g.weightLb }));
+  const portrait = input.portrait;
+
   const character = await db.character.upsert({
     where: { slug: input.slug },
     create: {
@@ -201,38 +269,82 @@ async function seedCharacter(
       campaignId,
       raceIndex: input.raceIndex,
       raceLabel: input.raceLabel,
+      subraceIndex: input.subraceIndex,
+      subraceLabel: input.subraceLabel,
+      backgroundIndex: input.backgroundIndex,
       backgroundLabel: input.backgroundLabel,
       alignmentIndex: input.alignmentIndex,
       ...abilities,
       hpMax,
       hpCurrent: hpMax,
-      armorClass: 10 + Math.floor((abilities.dexterity - 10) / 2),
+      armorClass: input.armorClass ?? 10 + Math.floor((abilities.dexterity - 10) / 2),
+      speedFt: input.speedFt ?? 30,
+      passivePerceptionOverride: input.passivePerception,
       savingThrowProficiencies: classDef.savingThrows,
       spellcastingAbility: classDef.spellcastingAbility,
+      portraitUrl: portrait ? `/portraits/${portrait.file}` : undefined,
+      portraitAlt: portrait?.alt,
+      portraitWidth: portrait?.width,
+      portraitHeight: portrait?.height,
       classes: {
         create: {
           classIndex: input.classIndex,
           classLabel: classDef.label,
+          subclassLabel: input.subclassLabel,
           level: input.level,
           hitDieSize: classDef.hitDie,
           isPrimary: true,
         },
       },
       skills: {
-        create: classDef.skills.map((skillIndex) => ({
+        create: skillIndexes.map((skillIndex) => ({
           skillIndex,
           proficiency: "PROFICIENT" as const,
         })),
       },
-      items: {
-        create: STARTER_GEAR.map((item, i) => ({
-          name: item.name,
-          weightLb: item.weightLb,
-          quantity: 1,
+      proficiencies: {
+        create: [
+          ...(input.toolProficiencies ?? []).map((label, i) => ({
+            kind: "TOOL" as const,
+            label,
+            order: i,
+          })),
+          ...(input.languages ?? []).map((label, i) => ({
+            kind: "LANGUAGE" as const,
+            label,
+            order: i,
+          })),
+        ],
+      },
+      features: {
+        create: (input.features ?? []).map((f, i) => ({
+          name: f.name,
+          description: f.description,
+          source: f.source ?? "CLASS",
           order: i,
         })),
       },
-      bio: { create: {} },
+      spells: {
+        create: (input.spells ?? []).map((s, i) => ({
+          srdIndex: s.srdIndex,
+          name: s.name,
+          level: s.level,
+          isPrepared: s.isPrepared ?? true,
+          source: "CLASS" as const,
+          order: i,
+        })),
+      },
+      items: {
+        create: gear.map((item, i) => ({
+          name: item.name,
+          category: item.category ?? "GEAR",
+          weightLb: item.weightLb,
+          quantity: item.quantity ?? 1,
+          equipped: item.equipped ?? false,
+          order: i,
+        })),
+      },
+      bio: { create: { personalityTraits: input.personalityTraits } },
     },
     update: {
       name: input.name,
